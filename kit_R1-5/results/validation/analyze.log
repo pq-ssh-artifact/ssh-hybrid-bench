@@ -1,0 +1,5 @@
+[ops] 29 rows; max run-to-run CV of medians: 13.13%
+[e2e] loopback: 300 blocks, failed connections: 0
+[e2e] wan: 150 blocks, failed connections: 0
+[e2e] constrained: 100 blocks, failed connections: 0
+written: ops_summary.csv, e2e_summary.csv, e2e_tests.csv
