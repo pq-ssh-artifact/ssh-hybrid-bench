@@ -1,1 +1,61 @@
-
+name: bench
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Numéro de passe (1, 2, 3...)"
+        default: "1"
+      platforms:
+        description: "Plateformes : arm64, gh-x86 ou les deux séparées par une virgule"
+        default: "arm64"
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+          - platform: gh-x86
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: kit_R1-5
+    steps:
+      - name: Sélection
+        id: sel
+        working-directory: .
+        run: |
+          if [[ ",${{ github.event.inputs.platforms }}," == *",${{ matrix.platform }},"* ]]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"; else echo "run=no" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.sel.outputs.run == 'yes'
+      - name: Configuration
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          cp config/platform.env.example config/platform.env
+          sed -i 's/^PLATFORM_ID=.*/PLATFORM_ID=${{ matrix.platform }}/' config/platform.env
+          lscpu
+      - name: Dépendances
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./00_install_deps.sh
+      - name: Compilation d'OpenSSH 10.0p2 et du harnais
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./01_build_openssh.sh
+      - name: Préparation de la machine
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./02_prepare_host.sh
+      - name: Environnement (Tableau 3)
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./03_collect_env.sh
+      - name: Mesures et analyse
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./04_run_benchmarks.sh all
+      - name: Récupération des résultats
+        if: always() && steps.sel.outputs.run == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.platform }}-pass${{ github.event.inputs.repeat }}
+          path: kit_R1-5/results/${{ matrix.platform }}
