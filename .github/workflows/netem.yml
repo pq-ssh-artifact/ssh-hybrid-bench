@@ -1,0 +1,73 @@
+name: netem
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Numéro de passe (1, 2, 3...)"
+        default: "1"
+      platforms:
+        description: "Plateformes : gh-x86, arm64 ou les deux séparées par une virgule"
+        default: "gh-x86"
+      blocks_clean:
+        description: "Blocs sans perte (contrôle netem = relais)"
+        default: "150"
+      blocks_lossy:
+        description: "Blocs avec 1 % de perte et gigue"
+        default: "300"
+jobs:
+  netem:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: gh-x86
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: kit_R1-5
+    steps:
+      - name: Sélection
+        id: sel
+        working-directory: .
+        run: |
+          if [[ ",${{ github.event.inputs.platforms }}," == *",${{ matrix.platform }},"* ]]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"; else echo "run=no" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.sel.outputs.run == 'yes'
+      - name: Configuration
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          cp config/platform.env.example config/platform.env
+          sed -i 's/^PLATFORM_ID=.*/PLATFORM_ID=${{ matrix.platform }}/' config/platform.env
+          test -s netem/run_netem.py || { echo "Le dossier netem manque dans kit_R1-5"; exit 1; }
+          lscpu; nproc; uname -r
+      - name: Dépendances
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          bash ./00_install_deps.sh
+          sudo apt-get install -y iproute2 ethtool iputils-ping
+          python3 -c "import pandas, scipy" 2>/dev/null || pip install --break-system-packages -q pandas scipy
+      - name: Vérification de tc netem
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          sudo modprobe sch_netem || { sudo apt-get install -y "linux-modules-extra-$(uname -r)" && sudo modprobe sch_netem; }
+          lsmod | grep netem
+      - name: Compilation d'OpenSSH 10.0p2
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./01_build_openssh.sh
+      - name: Préparation de la machine
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./02_prepare_host.sh || true
+      - name: Mesures tc netem (sans perte, puis 1 % de perte + gigue)
+        if: steps.sel.outputs.run == 'yes'
+        run: bash netem/netem_run.sh ${{ github.event.inputs.blocks_clean }} ${{ github.event.inputs.blocks_lossy }}
+      - name: Récupération des résultats
+        if: always() && steps.sel.outputs.run == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-netem-${{ matrix.platform }}-pass${{ github.event.inputs.repeat }}
+          path: kit_R1-5/results/${{ matrix.platform }}/netem
