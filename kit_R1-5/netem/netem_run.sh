@@ -28,16 +28,16 @@ echo "cœurs : client=$CPU_CLI serveur=$CPU_SRV (nproc=$NCPU)" | tee "$OUT/cpus.
 run_condition() { # nom profil blocs
   local cond=$1 prof=$2 blocks=$3
   echo "== $cond ($prof, $blocks blocs) — $(date -Is)"
-  sudo "$NS" up "$prof"
-  sudo "$NS" verify "$OUT/$cond"
+  sudo bash "$NS" up "$prof"
+  sudo bash "$NS" verify "$OUT/$cond"
   # contrôle : netem doit être actif, sinon on s'arrête (aucune donnée non émulée)
   sudo ip netns exec cli tc qdisc show dev veth-cli | grep -q netem || { echo "netem absent"; exit 1; }
   sudo ip netns exec cli taskset -c "$CPU_CLI" python3 "$KIT/netem/run_netem.py" \
       --condition "$cond" --blocks "$blocks" --out "$OUT" --prefix "$OPENSSH_PREFIX" \
       --server-ip 10.10.0.2 --sshd-netns srv --sshd-cpu "$CPU_SRV" --user root \
       2>&1 | tee "$OUT/$cond.log"
-  sudo "$NS" stats "$OUT/$cond"
-  sudo "$NS" down
+  sudo bash "$NS" stats "$OUT/$cond"
+  sudo bash "$NS" down
 }
 
 run_condition netem-clean clean "$N_CLEAN"
