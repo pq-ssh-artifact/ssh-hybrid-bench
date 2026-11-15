@@ -1,13 +1,15 @@
+# Mesures R1-5 sur les runners GitHub gratuits + pré-déclaration des prédictions (action 3).
+# Onglet Actions > bench > Run workflow.
 name: bench
 on:
   workflow_dispatch:
     inputs:
       repeat:
         description: "Numéro de passe (1, 2, 3...)"
-        default: "1"
+        default: "2"
       platforms:
         description: "Plateformes : arm64, gh-x86 ou les deux séparées par une virgule"
-        default: "arm64"
+        default: "arm64,gh-x86"
 jobs:
   bench:
     strategy:
@@ -38,9 +40,14 @@ jobs:
           cp config/platform.env.example config/platform.env
           sed -i 's/^PLATFORM_ID=.*/PLATFORM_ID=${{ matrix.platform }}/' config/platform.env
           lscpu
+          # copie de 04 sans l'analyse finale, pour pouvoir lancer les phases une par une
+          sed '/== Analyse statistique/,/analyze\.log/d' 04_run_benchmarks.sh > 04_phase.sh
+          test -s 06_validate_model.py || { echo "06_validate_model.py manque dans kit_R1-5"; exit 1; }
       - name: Dépendances
         if: steps.sel.outputs.run == 'yes'
-        run: bash ./00_install_deps.sh
+        run: |
+          bash ./00_install_deps.sh
+          python3 -c "import pandas" 2>/dev/null || pip install --break-system-packages -q pandas
       - name: Compilation d'OpenSSH 10.0p2 et du harnais
         if: steps.sel.outputs.run == 'yes'
         run: bash ./01_build_openssh.sh
@@ -50,9 +57,32 @@ jobs:
       - name: Environnement (Tableau 3)
         if: steps.sel.outputs.run == 'yes'
         run: bash ./03_collect_env.sh
-      - name: Mesures et analyse
+      - name: 1. Benchmark des opérations
         if: steps.sel.outputs.run == 'yes'
-        run: bash ./04_run_benchmarks.sh all
+        run: |
+          bash ./04_phase.sh ops
+          test -s results/${{ matrix.platform }}/ops/ops.csv
+      - name: 2. PRÉ-DÉCLARATION des prédictions (avant toute connexion)
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          python3 06_validate_model.py predict ${{ matrix.platform }}
+          echo "=== Empreinte à citer (horodatée par GitHub) ==="
+          date -u +"%Y-%m-%dT%H:%M:%SZ"
+          sha256sum results/${{ matrix.platform }}/predictions.csv
+      - name: 3. Connexions loopback
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./04_phase.sh loopback
+      - name: 4. Connexions WAN
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./04_phase.sh wan
+      - name: 5. Connexions contraintes
+        if: steps.sel.outputs.run == 'yes'
+        run: bash ./04_phase.sh constrained
+      - name: 6. Analyse statistique
+        if: steps.sel.outputs.run == 'yes'
+        run: |
+          KIT=$PWD; . config/platform.env
+          python3 "$HARNESS_DIR/analyze.py" "results/$PLATFORM_ID" | tee "results/$PLATFORM_ID/analyze.log"
       - name: Récupération des résultats
         if: always() && steps.sel.outputs.run == 'yes'
         uses: actions/upload-artifact@v4
